@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -44,8 +45,8 @@ type Client struct {
 	lastState      map[string]interface{}
 	lastStateInit  bool
 	checkMsgRate   time.Duration // How often to check for messages
-	checkMsgLimit int           // Maximum number of messages to retrieve per check
-	lastMsgCheck  time.Time     // Last time messages were checked
+	checkMsgLimit  int           // Maximum number of messages to retrieve per check
+	lastMsgCheck   time.Time     // Last time messages were checked
 
 	// Heartbeat functionality
 	lastHeartbeat time.Time // Last time heartbeat was sent
@@ -291,8 +292,20 @@ func (c *Client) setupAPIConfig() error {
 		}
 	}
 
-	// Set base URL (hardcoded for Tendrl service)
-	c.baseURL = "https://app.tendrl.com/api"
+	// Base URL: TENDRL_APP_URL env or production. Accepts either a bare origin
+	// ("http://192.168.1.50" — the SDK appends /api) or a full base URL already
+	// ending in /api (nano-agent style), so the same env var works everywhere.
+	// Without this the SDK could only ever talk to production, which made it
+	// impossible to test against a staging environment or a local stack.
+	if envURL := os.Getenv("TENDRL_APP_URL"); envURL != "" {
+		trimmed := strings.TrimRight(envURL, "/")
+		if !strings.HasSuffix(trimmed, "/api") {
+			trimmed += "/api"
+		}
+		c.baseURL = trimmed
+	} else {
+		c.baseURL = "https://app.tendrl.com/api"
+	}
 	c.debugLog("API base URL: %s", c.baseURL)
 
 	// Validate API key in managed mode
