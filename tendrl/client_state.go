@@ -20,6 +20,8 @@ func stateSnapshot(state map[string]interface{}) string {
 }
 
 func (c *Client) hasStateHandlers() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.stateHandler != nil || c.stateCallback != nil
 }
 
@@ -28,23 +30,34 @@ func (c *Client) hasInboundHandlers() bool {
 }
 
 func (c *Client) dispatchState(state map[string]interface{}) error {
-	if c.stateHandler != nil {
-		return c.stateHandler(state)
+	// Snapshot under the lock, then call the handler with it released; see
+	// dispatchMessage for why.
+	c.mu.RLock()
+	handler := c.stateHandler
+	callback := c.stateCallback
+	c.mu.RUnlock()
+
+	if handler != nil {
+		return handler(state)
 	}
-	if c.stateCallback != nil {
-		return c.stateCallback(state)
+	if callback != nil {
+		return callback(state)
 	}
 	return nil
 }
 
 // OnState registers a handler for remote state table changes (polled).
 func (c *Client) OnState(handler StateCallback) {
+	c.mu.Lock()
 	c.stateHandler = handler
+	c.mu.Unlock()
 }
 
 // SetStateCallback sets a catch-all state handler when OnState is not used.
 func (c *Client) SetStateCallback(callback StateCallback) {
+	c.mu.Lock()
 	c.stateCallback = callback
+	c.mu.Unlock()
 }
 
 // CheckState polls the state table and invokes handlers when it changes.
@@ -93,16 +106,19 @@ func (c *Client) CheckState() error {
 		state = map[string]interface{}{}
 	}
 
-	if c.lastStateInit {
-		if stateSnapshot(state) != stateSnapshot(c.lastState) {
-			if err := c.dispatchState(state); err != nil {
-				return err
-			}
-		}
-	}
-
+	// Record the new table before dispatching so a manual CheckState racing the
+	// background poller cannot see a stale snapshot and fire the handler twice.
+	c.mu.Lock()
+	seenBefore := c.lastStateInit
+	previous := stateSnapshot(c.lastState)
 	c.lastState = cloneStateMap(state)
 	c.lastStateInit = true
+	c.mu.Unlock()
+
+	// The first poll establishes the baseline; only later changes are dispatched.
+	if seenBefore && stateSnapshot(state) != previous {
+		return c.dispatchState(state)
+	}
 	return nil
 }
 

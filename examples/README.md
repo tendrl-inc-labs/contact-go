@@ -4,7 +4,7 @@ This directory contains example code demonstrating how to use the Tendrl Go SDK.
 
 ## Prerequisites
 
-1. **Go 1.21 or later** installed
+1. **Go 1.25 or later** installed
 2. **API Key**: Set the `TENDRL_KEY` environment variable with your Tendrl API key:
 
    ```bash

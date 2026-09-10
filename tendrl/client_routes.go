@@ -62,20 +62,31 @@ func allTags(msgTags, tags []string) bool {
 }
 
 func (c *Client) hasMessageHandlers() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return len(c.routes) > 0 || c.defaultHandler != nil || c.callback != nil
 }
 
 func (c *Client) dispatchMessage(msg IncomingMessage) error {
-	for _, route := range c.routes {
+	// Snapshot under the lock, then call handlers with it released: a handler is
+	// user code and may itself register a route, which would otherwise deadlock.
+	c.mu.RLock()
+	routes := make([]MessageRoute, len(c.routes))
+	copy(routes, c.routes)
+	defaultHandler := c.defaultHandler
+	callback := c.callback
+	c.mu.RUnlock()
+
+	for _, route := range routes {
 		if routeMatches(route, msg) {
 			return route.Handler(msg)
 		}
 	}
-	if c.defaultHandler != nil {
-		return c.defaultHandler(msg)
+	if defaultHandler != nil {
+		return defaultHandler(msg)
 	}
-	if c.callback != nil {
-		return c.callback(msg)
+	if callback != nil {
+		return callback(msg)
 	}
 	return nil
 }
@@ -86,10 +97,14 @@ func (c *Client) On(route MessageRoute) {
 	if route.Handler == nil {
 		return
 	}
+	c.mu.Lock()
 	c.routes = append(c.routes, route)
+	c.mu.Unlock()
 }
 
 // OnDefault registers a catch-all handler when no route matches.
 func (c *Client) OnDefault(handler MessageCallback) {
+	c.mu.Lock()
 	c.defaultHandler = handler
+	c.mu.Unlock()
 }

@@ -17,7 +17,9 @@ func (c *Client) sendHeartbeat() error {
 			DiskSize: 0,
 		}
 	} else {
-		c.debugLog("Heartbeat data: mem_free=%d, mem_total=%d, disk_free=%d, disk_size=%d",
+		// HeartbeatData fields are float64 byte counts. %d on a float64 prints
+		// %!d(float64=8.589934592e+09), so these are formatted as whole numbers.
+		c.debugLog("Heartbeat data: mem_free=%.0f, mem_total=%.0f, disk_free=%.0f, disk_size=%.0f",
 			resources.MemFree, resources.MemTotal, resources.DiskFree, resources.DiskSize)
 	}
 

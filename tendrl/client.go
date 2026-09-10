@@ -36,7 +36,10 @@ type Client struct {
 	wg           sync.WaitGroup
 	done         chan struct{}
 
-	// Message callback functionality
+	// Message callback functionality.
+	// Handlers may be registered at any time from any goroutine while the
+	// background poller is running, so everything below is guarded by mu.
+	mu             sync.RWMutex
 	callback       MessageCallback
 	defaultHandler MessageCallback
 	routes         []MessageRoute
@@ -46,7 +49,10 @@ type Client struct {
 	lastStateInit  bool
 	checkMsgRate   time.Duration // How often to check for messages
 	checkMsgLimit  int           // Maximum number of messages to retrieve per check
-	lastMsgCheck   time.Time     // Last time messages were checked
+
+	// rateChanged wakes the background poller so a new check rate takes effect
+	// immediately instead of after the previous interval elapses.
+	rateChanged chan struct{}
 
 	// Heartbeat functionality
 	lastHeartbeat time.Time // Last time heartbeat was sent
@@ -95,7 +101,7 @@ func NewClientWithModeAndAPIKey(managed bool, apiKey string) (*Client, error) {
 		apiKey:        apiKey,          // Set API key if provided
 		checkMsgRate:  3 * time.Second, // Default: check every 3 seconds
 		checkMsgLimit: 1,               // Default: get 1 message per check
-		lastMsgCheck:  time.Now(),
+		rateChanged:   make(chan struct{}, 1),
 		lastHeartbeat: time.Now(), // Initialize heartbeat timer
 	}
 
@@ -170,7 +176,9 @@ func NewClientWithModeAndAPIKey(managed bool, apiKey string) (*Client, error) {
 			}()
 		}
 
-		// Start message checking if callback is set
+		// Start the inbound poller. It runs for the life of a managed client and
+		// no-ops per tick until a handler is registered, because handlers can only
+		// be registered after this constructor returns.
 		client.startMessageChecking()
 
 		// Update entity status to online
@@ -197,7 +205,7 @@ func NewClientWithConfigAndAPIKey(configPath string, apiKey string) (*Client, er
 		apiKey:        apiKey,          // Set API key if provided
 		checkMsgRate:  3 * time.Second, // Default: check every 3 seconds
 		checkMsgLimit: 1,               // Default: get 1 message per check
-		lastMsgCheck:  time.Now(),
+		rateChanged:   make(chan struct{}, 1),
 		lastHeartbeat: time.Now(), // Initialize heartbeat timer
 	}
 
@@ -272,7 +280,9 @@ func NewClientWithConfigAndAPIKey(configPath string, apiKey string) (*Client, er
 			}()
 		}
 
-		// Start message checking if callback is set
+		// Start the inbound poller. It runs for the life of a managed client and
+		// no-ops per tick until a handler is registered, because handlers can only
+		// be registered after this constructor returns.
 		client.startMessageChecking()
 
 		// Update entity status to online
