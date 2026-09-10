@@ -86,15 +86,10 @@ func NewClientWithModeAndAPIKey(managed bool, apiKey string) (*Client, error) {
 	// Convert to internal config structure with defaults
 	config := configFile.toConfig()
 
-	// Override managed mode if explicitly specified
+	// The caller's argument decides the mode, not the file's key. Gate only
+	// after that, or the gating keys off the wrong value.
 	config.Managed = managed
-
-	// Disable managed-mode features
-	if !config.Managed {
-		config.OfflineStorage = false
-		config.OfflineRetryEnabled = false
-		config.ConnectivityCheckEnabled = false
-	}
+	config.ApplyManagedGating()
 
 	client := &Client{
 		config:        config,
@@ -200,8 +195,11 @@ func NewClientWithConfigAndAPIKey(configPath string, apiKey string) (*Client, er
 		return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
 	}
 
+	clientConfig := config.toConfig()
+	clientConfig.ApplyManagedGating()
+
 	client := &Client{
-		config:        config.toConfig(),
+		config:        clientConfig,
 		apiKey:        apiKey,          // Set API key if provided
 		checkMsgRate:  3 * time.Second, // Default: check every 3 seconds
 		checkMsgLimit: 1,               // Default: get 1 message per check

@@ -5,3 +5,7 @@
 .env.*
 !.env.example
 *.pem
+
+# Offline-storage database written by a managed client (default path is relative)
+tendrl_storage.db
+*.db

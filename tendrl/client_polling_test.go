@@ -70,9 +70,14 @@ func newPollingClient(t *testing.T, srv *pollingTestServer) *Client {
 	t.Setenv("TENDRL_APP_URL", srv.URL)
 
 	sendHeartbeat := false
+	managed := true
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	cfg := &ConfigFile{
-		Managed:       true,
+		Managed: &managed,
+		// Offline storage is on by default in managed mode, and the default
+		// path is relative -- without this a test run drops a database in the
+		// package directory.
+		StoragePath:   filepath.Join(t.TempDir(), "storage.db"),
 		Timeout:       5,
 		MaxRetries:    1,
 		MaxQueueSize:  16,

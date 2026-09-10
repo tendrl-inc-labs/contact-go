@@ -15,8 +15,15 @@ type ConfigFile struct {
 	Timeout    int `json:"timeout_seconds,omitempty"` // Timeout in seconds (JSON friendly)
 	MaxRetries int `json:"max_retries,omitempty"`
 
-	// Mode settings
-	Managed bool `json:"managed,omitempty"`
+	// Mode settings.
+	//
+	// These four are pointers for the same reason SendHeartbeat is: a plain
+	// bool has no "unset" state, so an absent config file read as an explicit
+	// false and overwrote the defaults below with zero values. A managed client
+	// on a host with no config file therefore ran with offline storage, offline
+	// retry, connectivity checking and heartbeats all off, which is the opposite
+	// of what managed mode is documented to do.
+	Managed *bool `json:"managed,omitempty"`
 
 	// Batch processing settings
 	MinBatchSize     int     `json:"min_batch_size,omitempty"`
@@ -30,17 +37,17 @@ type ConfigFile struct {
 	MaxBatchIntervalMs int `json:"max_batch_interval_ms,omitempty"`
 
 	// Storage settings
-	OfflineStorage bool   `json:"offline_storage,omitempty"`
+	OfflineStorage *bool  `json:"offline_storage,omitempty"`
 	StoragePath    string `json:"storage_path,omitempty"`
 
 	// Offline retry settings
-	OfflineRetryEnabled  bool `json:"offline_retry_enabled,omitempty"`
-	OfflineRetryInterval int  `json:"offline_retry_interval_seconds,omitempty"`
-	OfflineRetryLimit    int  `json:"offline_retry_limit,omitempty"`
+	OfflineRetryEnabled  *bool `json:"offline_retry_enabled,omitempty"`
+	OfflineRetryInterval int   `json:"offline_retry_interval_seconds,omitempty"`
+	OfflineRetryLimit    int   `json:"offline_retry_limit,omitempty"`
 
 	// Connectivity monitoring settings
-	ConnectivityCheckEnabled  bool `json:"connectivity_check_enabled,omitempty"`
-	ConnectivityCheckInterval int  `json:"connectivity_check_interval_seconds,omitempty"`
+	ConnectivityCheckEnabled  *bool `json:"connectivity_check_enabled,omitempty"`
+	ConnectivityCheckInterval int   `json:"connectivity_check_interval_seconds,omitempty"`
 
 	// Heartbeat settings
 	SendHeartbeat     *bool `json:"send_heartbeat,omitempty"`             // Enable automatic heartbeat messages (nil = use default true)
@@ -126,14 +133,15 @@ func GetDefaultConfigPath() string {
 
 // GenerateExampleConfig creates an example configuration file with all options
 func GenerateExampleConfig() *ConfigFile {
-	sendHeartbeat := true
+	enabled := true
+	sendHeartbeat := &enabled
 	config := &ConfigFile{
 		// HTTP settings
 		Timeout:    10,
 		MaxRetries: 3,
 
 		// Mode settings
-		Managed: true,
+		Managed: &enabled,
 
 		// Batch processing settings
 		MinBatchSize:     10,
@@ -147,20 +155,20 @@ func GenerateExampleConfig() *ConfigFile {
 		MaxBatchIntervalMs: 1000,
 
 		// Storage settings
-		OfflineStorage: true,
+		OfflineStorage: &enabled,
 		StoragePath:    "tendrl_storage.db",
 
 		// Offline retry settings
-		OfflineRetryEnabled:  true,
+		OfflineRetryEnabled:  &enabled,
 		OfflineRetryInterval: 30,
 		OfflineRetryLimit:    5,
 
 		// Connectivity monitoring settings
-		ConnectivityCheckEnabled:  true,
+		ConnectivityCheckEnabled:  &enabled,
 		ConnectivityCheckInterval: 30,
 
 		// Heartbeat settings
-		SendHeartbeat:     &sendHeartbeat,
+		SendHeartbeat:     sendHeartbeat,
 		HeartbeatInterval: 30,
 
 		// Debug settings
@@ -247,27 +255,43 @@ func (cf *ConfigFile) toConfig() *Config {
 		config.HeartbeatInterval = time.Duration(cf.HeartbeatInterval) * time.Second
 	}
 
-	// Boolean fields - use config file values
-	config.Managed = cf.Managed
-	config.OfflineStorage = cf.OfflineStorage
-	config.OfflineRetryEnabled = cf.OfflineRetryEnabled
-	config.ConnectivityCheckEnabled = cf.ConnectivityCheckEnabled
-	config.Debug = cf.Debug
-	// SendHeartbeat: Use pointer to distinguish "not set" (nil = use default true) from "explicitly false"
+	// Booleans: nil means the file did not mention the key, so the default set
+	// above stands. Only an explicit value overrides it.
+	if cf.Managed != nil {
+		config.Managed = *cf.Managed
+	}
+	if cf.OfflineStorage != nil {
+		config.OfflineStorage = *cf.OfflineStorage
+	}
+	if cf.OfflineRetryEnabled != nil {
+		config.OfflineRetryEnabled = *cf.OfflineRetryEnabled
+	}
+	if cf.ConnectivityCheckEnabled != nil {
+		config.ConnectivityCheckEnabled = *cf.ConnectivityCheckEnabled
+	}
 	if cf.SendHeartbeat != nil {
 		config.SendHeartbeat = *cf.SendHeartbeat
 	}
-	// Otherwise, keep the default (true) that was set above
+	config.Debug = cf.Debug
 
-	// Disable managed-mode features if in headless mode
-	if !config.Managed {
-		config.OfflineStorage = false
-		config.OfflineRetryEnabled = false
-		config.ConnectivityCheckEnabled = false
-		config.SendHeartbeat = false // Disable heartbeat in headless mode
-	}
-
+	// Gating deliberately does NOT happen here. The constructors override
+	// Managed from their own argument afterwards, so a teardown run at this
+	// point would key off the file's flag rather than the mode the caller
+	// actually asked for. Both constructors call ApplyManagedGating once the
+	// effective mode is settled.
 	return config
+}
+
+// ApplyManagedGating switches off everything that only exists to serve managed
+// mode. Call it once Managed holds the value the client will really run with.
+func (c *Config) ApplyManagedGating() {
+	if c.Managed {
+		return
+	}
+	c.OfflineStorage = false
+	c.OfflineRetryEnabled = false
+	c.ConnectivityCheckEnabled = false
+	c.SendHeartbeat = false
 }
 
 // GetPlatformInfo returns platform information for User-Agent string

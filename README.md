@@ -138,7 +138,7 @@ If neither exists, built-in defaults apply. To load a file from anywhere else, p
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `managed` | bool | `false` | Managed mode. Ignored by `NewClient*` (the mode parameter wins); **required** for managed mode with `NewClientWithConfig*` |
+| `managed` | bool | `true` | Managed mode. Ignored by `NewClient*` (the mode parameter wins); set it to `false` here for a headless client built with `NewClientWithConfig*` |
 | `timeout_seconds` | int | `10` | HTTP request timeout |
 | `max_retries` | int | `3` | Retry attempts for a failed send. Backoff is a fixed 1s, 2s, 3s... and is not configurable |
 | `debug` | bool | `false` | Enable debug logging to stderr |
@@ -149,17 +149,21 @@ If neither exists, built-in defaults apply. To load a file from anywhere else, p
 | `target_mem_percent` | float | `80.0` | Memory load at which batching backs off |
 | `min_batch_interval_ms` | int | `100` | Flush interval for a partial batch |
 | `max_batch_interval_ms` | int | `1000` | Reserved for batch timing; currently only `min_batch_interval_ms` drives the flush ticker |
-| `offline_storage` | bool | `false` | Persist messages to BoltDB when a send fails |
+| `offline_storage` | bool | `true` in managed mode | Persist messages to BoltDB when a send fails |
 | `storage_path` | string | `tendrl_storage.db` | BoltDB file path |
-| `offline_retry_enabled` | bool | `false` | Run the background retry loop for stored messages |
+| `offline_retry_enabled` | bool | `true` in managed mode | Run the background retry loop for stored messages |
 | `offline_retry_interval_seconds` | int | `30` | How often that loop runs |
 | `offline_retry_limit` | int | `5` | **Currently inert.** Parsed and stored, but no code reads it; a stored message is retried until it succeeds or its 1-hour TTL expires |
-| `connectivity_check_enabled` | bool | `false` | Run background connectivity probes against `/health` |
+| `connectivity_check_enabled` | bool | `true` in managed mode | Run background connectivity probes against `/health` |
 | `connectivity_check_interval_seconds` | int | `30` | How often those probes run |
 | `send_heartbeat` | bool | `true` when `managed` is true | Send automatic heartbeats |
 | `heartbeat_interval_seconds` | int | `30` | Interval between heartbeats |
 
-**Important - booleans default to off.** Every boolean above except `send_heartbeat` defaults to `false` when the key is absent, and the managed-mode features keyed off them are disabled along with it. In particular, a client built with `tendrl.NewClient(true)` and **no config file** gets queuing, batching and metrics, but **not** offline storage, offline retry, connectivity checks or heartbeats. To get those, write a config file that sets `"managed": true` along with the features you want.
+**An absent key keeps the default; only an explicit value overrides it.** A managed client with no config file at all runs with offline storage, offline retry, connectivity checks and heartbeats on, which is what managed mode is for. Writing `"offline_storage": false` still turns that one off and leaves the rest alone.
+
+This changed. Previously every one of these defaulted to off when its key was absent, so `tendrl.NewClient(true)` on a host with no config file reported itself as managed while running none of them. If you were relying on that, set the keys you want off explicitly.
+
+Note that `storage_path` is relative by default, so a managed client now writes `tendrl_storage.db` into its working directory unless you set an absolute path.
 
 To generate an example configuration file with every feature enabled:
 
