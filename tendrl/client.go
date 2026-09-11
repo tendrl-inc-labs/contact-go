@@ -431,10 +431,13 @@ func (c *Client) Stop() {
 		if c.done != nil {
 			close(c.done)
 		}
+		// Wait for the queue processor to finish its shutdown drain BEFORE
+		// closing storage. Closing first meant the drain had nowhere to
+		// persist a final batch that failed to send.
+		c.wg.Wait()
 		if c.storage != nil {
 			c.storage.Close()
 		}
-		c.wg.Wait()
 	}
 	c.debugLog("TendrlClient stopped")
 }

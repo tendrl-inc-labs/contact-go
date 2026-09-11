@@ -60,23 +60,7 @@ func (c *Client) processQueue() {
 			batch = append(batch, msg)
 
 			if len(batch) >= c.calculateDynamicBatchSize() {
-				if _, err := c.sendMessages(batch, false); err != nil && c.storage != nil {
-					// Store failed messages
-					for _, m := range batch {
-						if dataStr, err := c.dataAsString(m.Data); err == nil {
-							var tags []string
-							if m.Context != nil {
-								tags = m.Context.Tags
-							}
-							c.storage.Store(
-								time.Now().Format(time.RFC3339),
-								dataStr,
-								tags,
-								3600,
-							)
-						}
-					}
-				}
+				c.flushBatch(batch)
 				batch = batch[:0]
 			}
 
@@ -118,10 +102,57 @@ func (c *Client) processQueue() {
 			}
 
 		case <-c.done:
+			// Drain the channel before leaving. A select picks at random when
+			// more than one case is ready, so messages can still be sitting in
+			// c.queue at this point; flushing only the assembled batch
+			// abandoned them, losing a final message roughly a quarter of the
+			// time. Nothing raised and nothing was logged.
+		drain:
+			for {
+				select {
+				case msg := <-c.queue:
+					batch = append(batch, msg)
+				default:
+					break drain
+				}
+			}
 			if len(batch) > 0 {
-				c.sendMessages(batch, false)
+				c.flushBatch(batch)
 			}
 			return
 		}
+	}
+}
+
+// flushBatch sends a batch and persists it when the send fails.
+//
+// The shutdown path used to call sendMessages directly and discard its error,
+// so a final batch that failed to send was lost even with offline storage
+// enabled. Both paths go through here now.
+func (c *Client) flushBatch(batch []Message) {
+	if len(batch) == 0 {
+		return
+	}
+	if _, err := c.sendMessages(batch, false); err != nil {
+		c.storeFailedBatch(batch)
+	}
+}
+
+// storeFailedBatch persists messages that could not be sent, if there is
+// anywhere to put them.
+func (c *Client) storeFailedBatch(batch []Message) {
+	if c.storage == nil {
+		return
+	}
+	for _, m := range batch {
+		dataStr, err := c.dataAsString(m.Data)
+		if err != nil {
+			continue
+		}
+		var tags []string
+		if m.Context != nil {
+			tags = m.Context.Tags
+		}
+		c.storage.Store(time.Now().Format(time.RFC3339), dataStr, tags, 3600)
 	}
 }
